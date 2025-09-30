@@ -111,7 +111,7 @@ def delete_ql_env(var_name: str):
         return False
 
 # ---------------- 青龙面板变量更新函数 ----------------
-def save_cookie_to_ql(var_name: str, cookie: str):
+def save_cookie_to_ql(var_name: str, cookie: str, remarks: str = "NodeSeek签到自动创建"):
     """保存Cookie到青龙面板环境变量"""
     
     try:
@@ -124,7 +124,7 @@ def save_cookie_to_ql(var_name: str, cookie: str):
                 {
                     "name": var_name,
                     "value": cookie,
-                    "remarks": "NodeSeek签到自动创建",
+                    "remarks": remarks,
                     "status": 2  # 启用状态
                 }
             ]
@@ -144,30 +144,33 @@ def save_cookie_to_ql(var_name: str, cookie: str):
 # ---------------- Docker Cookie 文件保存 ----------------
 COOKIE_FILE_PATH = "./cookie/NS_COOKIE.txt"
 
-def save_cookie_to_file(cookie_str: str):
+def save_cookie_to_file(cookie_str: str, file_path: str):
     """将Cookie保存到文件"""
     try:
         # 确保目录存在
-        os.makedirs(os.path.dirname(COOKIE_FILE_PATH), exist_ok=True)
-        with open(COOKIE_FILE_PATH, "w") as f:
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w") as f:
             f.write(cookie_str)
-        print(f"Cookie 已成功保存到文件: {COOKIE_FILE_PATH}")
+        print(f"Cookie 已成功保存到文件: {file_path}")
         return True
     except Exception as e:
         print(f"保存Cookie到文件失败: {e}")
         return False
 
 # ---------------- 统一变量保存函数 ----------------
-def save_cookie(var_name: str, cookie: str):
+def save_cookie(var_name: str, cookie: str, cookie_file_path: str = COOKIE_FILE_PATH, remarks: str = "NodeSeek签到自动创建"):
     """根据当前环境保存Cookie到相应位置"""
     env_type = detect_environment()
     
     if env_type == "docker":
-        print("检测到Docker环境，保存Cookie到文件...")
-        return save_cookie_to_file(cookie)
+        if cookie_file_path:
+            print("检测到Docker环境，保存Cookie到文件...")
+            return save_cookie_to_file(cookie, cookie_file_path)
+        print("检测到Docker环境，但未提供Cookie文件路径，跳过文件保存")
+        return False
     elif env_type == "qinglong":
         print("检测到青龙环境，保存变量到青龙面板...")
-        return save_cookie_to_ql(var_name, cookie)
+        return save_cookie_to_ql(var_name, cookie, remarks=remarks)
     elif env_type == "github":
         print("检测到GitHub环境，保存变量到GitHub Actions...")
         return save_cookie_to_github_var(var_name, cookie)
@@ -384,39 +387,37 @@ def print_signin_stats(stats, account_name):
     print(f"签到天数: {stats['days_count']} 天")
     print(f"总获得鸡腿: {stats['total_amount']} 个")
     print(f"平均每日鸡腿: {stats['average']} 个")
-    
 
-# ---------------- 主流程 ----------------
-if __name__ == "__main__":
+# ---------------- NodeSeek 执行入口 ----------------
+def run_nodeseek_signins():
+    print("==== NodeSeek 签到任务开始 ====")
     solver_type = os.getenv("SOLVER_TYPE", "turnstile")
     api_base_url = os.getenv("API_BASE_URL", "")
-    client_key = os.getenv("CLIENTT_KEY", "") 
+    client_key = os.getenv("CLIENTT_KEY", "")
     ns_random = os.getenv("NS_RANDOM", "true")
 
     env_type = detect_environment()
     print(f"当前运行环境: {env_type}")
-    
+
     accounts = []
 
-    # 先收集账号密码配置
-    user = os.getenv("USER")
-    password = os.getenv("PASS")
+    user = os.getenv("NS_USER") or os.getenv("USER")
+    password = os.getenv("NS_PASS") or os.getenv("PASS")
     if user and password:
         accounts.append({"user": user, "password": password})
 
     index = 1
     while True:
-        user = os.getenv(f"USER{index}")
-        password = os.getenv(f"PASS{index}")
+        user = os.getenv(f"NS_USER{index}") or os.getenv(f"USER{index}")
+        password = os.getenv(f"NS_PASS{index}") or os.getenv(f"PASS{index}")
         if user and password:
             accounts.append({"user": user, "password": password})
             index += 1
         else:
             break
-    
-    # 读取现有Cookie
+
     all_cookies = ""
-    if detect_environment() == "docker":
+    if env_type == "docker":
         print(f"Docker环境，尝试从 {COOKIE_FILE_PATH} 读取Cookie...")
         if os.path.exists(COOKIE_FILE_PATH):
             try:
@@ -429,37 +430,37 @@ if __name__ == "__main__":
             print("Cookie文件不存在，将使用空Cookie。")
     else:
         all_cookies = os.getenv("NS_COOKIE", "")
-        
+
     cookie_list = all_cookies.split("&")
     cookie_list = [c.strip() for c in cookie_list if c.strip()]
-    
+
     print(f"共发现 {len(accounts)} 个账户配置，{len(cookie_list)} 个现有Cookie")
-    
+
     if len(accounts) == 0 and len(cookie_list) > 0:
-        for i in range(len(cookie_list)):
+        for _ in range(len(cookie_list)):
             accounts.append({"user": "", "password": ""})
-    
+
     max_count = max(len(accounts), len(cookie_list))
-    
+
     while len(accounts) < max_count:
         accounts.append({"user": "", "password": ""})
-    
+
     while len(cookie_list) < max_count:
         cookie_list.append("")
-    
+
     cookies_updated = False
-    
+
     for i in range(max_count):
         account_index = i + 1
         account = accounts[i]
         user = account["user"]
         password = account["password"]
         cookie = cookie_list[i] if i < len(cookie_list) else ""
-        
+
         display_user = user if user else f"账号{account_index}"
-        
+
         print(f"\n==== 账号 {display_user} 开始签到 ====")
-        
+
         if cookie:
             result, msg = sign(cookie, ns_random)
         else:
@@ -467,14 +468,14 @@ if __name__ == "__main__":
 
         if result in ["success", "already"]:
             print(f"账号 {display_user} 签到成功: {msg}")
-            
+
             print("正在查询签到收益统计...")
             stats, stats_msg = get_signin_stats(cookie, 30)
             if stats:
                 print_signin_stats(stats, display_user)
             else:
                 print(f"统计查询失败: {stats_msg}")
-            
+
             if hadsend:
                 try:
                     notification_msg = f"账号 {display_user} 签到成功：{msg}"
@@ -485,7 +486,7 @@ if __name__ == "__main__":
                     print(f"发送通知失败: {e}")
         else:
             print(f"签到失败或Cookie无效: {msg}")
-            
+
             if user and password:
                 print("尝试重新登录获取新Cookie...")
                 new_cookie = session_login(user, password, solver_type, api_base_url, client_key)
@@ -495,16 +496,16 @@ if __name__ == "__main__":
                     if result in ["success", "already"]:
                         print(f"账号 {display_user} 签到成功: {msg}")
                         cookies_updated = True
-                        
+
                         print("正在查询签到收益统计...")
                         stats, stats_msg = get_signin_stats(new_cookie, 30)
                         if stats:
                             print_signin_stats(stats, display_user)
                         else:
                             print(f"统计查询失败: {stats_msg}")
-                        
+
                         cookie_list[i] = new_cookie
-                        
+
                         if hadsend:
                             try:
                                 notification_msg = f"账号 {display_user} 签到成功：{msg}"
@@ -524,7 +525,7 @@ if __name__ == "__main__":
                             print(f"发送通知失败: {e}")
             else:
                 print(f"账号 {display_user} 无法重新登录: 未配置用户名或密码")
-    
+
     if cookies_updated and cookie_list:
         print("\n==== 处理完毕，保存更新后的Cookie ====")
         all_cookies_new = "&".join([c for c in cookie_list if c.strip()])
@@ -533,3 +534,341 @@ if __name__ == "__main__":
             print("所有Cookie已成功保存")
         except Exception as e:
             print(f"保存Cookie变量异常: {e}")
+
+# ---------------- Deepflood 登录与签到逻辑 ----------------
+def df_session_login(user, password, solver_type, api_base_url, client_key):
+    try:
+        solver_choice = (solver_type or "turnstile").lower()
+        if solver_choice == "yescaptcha":
+            print("正在使用 YesCaptcha 解决验证码...")
+            solver = YesCaptchaSolver(
+                api_base_url=api_base_url or "https://api.yescaptcha.com",
+                client_key=client_key
+            )
+        else:
+            print("正在使用 TurnstileSolver 解决验证码...")
+            solver = TurnstileSolver(
+                api_base_url=api_base_url,
+                client_key=client_key
+            )
+
+        token = solver.solve(
+            url="https://www.deepflood.com/signIn.html",
+            sitekey="0x4AAAAAAAaNy7leGjewpVyR",
+            verbose=True
+        )
+        if not token:
+            print("验证码解析失败")
+            return None
+    except Exception as e:
+        print(f"验证码错误: {e}")
+        return None
+
+    session = requests.Session(impersonate="chrome110")
+    session.get("https://www.deepflood.com/signIn.html")
+
+    data = {
+        "username": user,
+        "password": password,
+        "token": token,
+        "source": "turnstile"
+    }
+    headers = {
+        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+        'sec-ch-ua': "\"Not A(Brand\";v=\"99\", \"Microsoft Edge\";v=\"121\", \"Chromium\";v=\"121\"",
+        'sec-ch-ua-mobile': "?0",
+        'sec-ch-ua-platform': "\"Windows\"",
+        'origin': "https://www.deepflood.com",
+        'sec-fetch-site': "same-origin",
+        'sec-fetch-mode': "cors",
+        'sec-fetch-dest': "empty",
+        'referer': "https://www.deepflood.com/signIn.html",
+        'accept-language': "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
+        'Content-Type': "application/json"
+    }
+    try:
+        response = session.post("https://www.deepflood.com/api/account/signIn", json=data, headers=headers)
+        resp_json = response.json()
+        if resp_json.get("success"):
+            cookies = session.cookies.get_dict()
+            cookie_string = '; '.join([f"{k}={v}" for k, v in cookies.items()])
+            return cookie_string
+        else:
+            print("登录失败:", resp_json.get("message"))
+            return None
+    except Exception as e:
+        print("登录异常:", e)
+        return None
+
+def df_sign(df_cookie, df_random):
+    if not df_cookie:
+        return "invalid", "无有效Cookie"
+
+    headers = {
+        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+        'origin': "https://www.deepflood.com",
+        'referer': "https://www.deepflood.com/board",
+        'Content-Type': 'application/json',
+        'Cookie': df_cookie
+    }
+    try:
+        url = f"https://www.deepflood.com/api/attendance?random={df_random}"
+        response = requests.post(url, headers=headers, impersonate="chrome110")
+        data = response.json()
+        msg = data.get("message", "")
+        if "鸡腿" in msg or data.get("success"):
+            return "success", msg
+        elif "已完成签到" in msg:
+            return "already", msg
+        elif data.get("status") == 404:
+            return "invalid", msg
+        return "fail", msg
+    except Exception as e:
+        return "error", str(e)
+
+def df_get_signin_stats(df_cookie, days=30):
+    """查询本月的签到收益统计"""
+    if not df_cookie:
+        return None, "无有效Cookie"
+
+    headers = {
+        'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+        'origin': "https://www.deepflood.com",
+        'referer': "https://www.deepflood.com/board",
+        'Cookie': df_cookie
+    }
+
+    try:
+        utc_offset = timedelta(hours=8)
+        now_utc = datetime.now(ZoneInfo("UTC"))
+        now_shanghai = now_utc + utc_offset
+        current_month_start = datetime(now_shanghai.year, now_shanghai.month, 1)
+
+        all_records = []
+        page = 1
+
+        while page <= 10:
+            url = f"https://www.deepflood.com/api/account/credit/page-{page}"
+            response = requests.get(url, headers=headers, impersonate="chrome110")
+            data = response.json()
+
+            if not data.get("success") or not data.get("data"):
+                break
+
+            records = data.get("data", [])
+            if not records:
+                break
+
+            last_record_time = datetime.fromisoformat(records[-1][3].replace('Z', '+00:00'))
+            last_record_time_shanghai = last_record_time.replace(tzinfo=None) + utc_offset
+            if last_record_time_shanghai < current_month_start:
+                for record in records:
+                    record_time = datetime.fromisoformat(record[3].replace('Z', '+00:00'))
+                    record_time_shanghai = record_time.replace(tzinfo=None) + utc_offset
+                    if record_time_shanghai >= current_month_start:
+                        all_records.append(record)
+                break
+            else:
+                all_records.extend(records)
+
+            page += 1
+            time.sleep(0.5)
+
+        signin_records = []
+        for record in all_records:
+            amount, balance, description, timestamp = record
+            record_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            record_time_shanghai = record_time.replace(tzinfo=None) + utc_offset
+
+            if (record_time_shanghai >= current_month_start and
+                    "签到收益" in description and "鸡腿" in description):
+                signin_records.append({
+                    'amount': amount,
+                    'date': record_time_shanghai.strftime('%Y-%m-%d'),
+                    'description': description
+                })
+
+        if not signin_records:
+            return {
+                'total_amount': 0,
+                'average': 0,
+                'days_count': 0,
+                'records': [],
+                'period': f"{now_shanghai.strftime('%Y年%m月')}"
+            }, "查询成功，但没有找到本月签到记录"
+
+        total_amount = sum(record['amount'] for record in signin_records)
+        days_count = len(signin_records)
+        average = round(total_amount / days_count, 2) if days_count > 0 else 0
+
+        stats = {
+            'total_amount': total_amount,
+            'average': average,
+            'days_count': days_count,
+            'records': signin_records,
+            'period': f"{now_shanghai.strftime('%Y年%m月')}"
+        }
+
+        return stats, "查询成功"
+
+    except Exception as e:
+        return None, f"查询异常: {str(e)}"
+
+
+def run_deepflood_signins():
+    print("\n==== Deepflood 签到任务开始 ====")
+    df_solver_type = os.getenv("DF_SOLVER_TYPE", os.getenv("SOLVER_TYPE", "turnstile"))
+    api_base_url = os.getenv("DF_API_BASE_URL", os.getenv("API_BASE_URL", ""))
+    client_key = os.getenv("DF_CLIENTT_KEY", os.getenv("CLIENTT_KEY", ""))
+    df_random = os.getenv("DF_RANDOM", "true")
+
+    env_type = detect_environment()
+    print(f"当前运行环境: {env_type}")
+    print(f"Deepflood 验证码模式: {df_solver_type}")
+
+    accounts = []
+
+    user = os.getenv("DF_USER")
+    password = os.getenv("DF_PASS")
+    if user and password:
+        accounts.append({"user": user, "password": password})
+
+    index = 1
+    while True:
+        user = os.getenv(f"DF_USER{index}")
+        password = os.getenv(f"DF_PASS{index}")
+        if user and password:
+            accounts.append({"user": user, "password": password})
+            index += 1
+        else:
+            break
+
+    df_cookie_file_path = "./cookie/DF_COOKIE.txt"
+    all_cookies = ""
+    if env_type == "docker":
+        print(f"Docker环境，尝试从 {df_cookie_file_path} 读取Cookie...")
+        if os.path.exists(df_cookie_file_path):
+            try:
+                with open(df_cookie_file_path, "r") as f:
+                    all_cookies = f.read().strip()
+                print("成功从文件加载Cookie。")
+            except Exception as e:
+                print(f"从文件读取Cookie失败: {e}")
+        else:
+            print("Cookie文件不存在，将使用空Cookie。")
+    else:
+        all_cookies = os.getenv("DF_COOKIE", "")
+
+    cookie_list = all_cookies.split("&")
+    cookie_list = [c.strip() for c in cookie_list if c.strip()]
+
+    print(f"共发现 {len(accounts)} 个账户配置，{len(cookie_list)} 个现有Cookie")
+
+    if not accounts and not cookie_list:
+        print("未检测到 Deepflood 配置，跳过执行。")
+        return
+
+    if len(accounts) == 0 and len(cookie_list) > 0:
+        for _ in range(len(cookie_list)):
+            accounts.append({"user": "", "password": ""})
+
+    max_count = max(len(accounts), len(cookie_list))
+
+    while len(accounts) < max_count:
+        accounts.append({"user": "", "password": ""})
+
+    while len(cookie_list) < max_count:
+        cookie_list.append("")
+
+    cookies_updated = False
+
+    for i in range(max_count):
+        account_index = i + 1
+        account = accounts[i]
+        user = account["user"]
+        password = account["password"]
+        cookie = cookie_list[i] if i < len(cookie_list) else ""
+
+        display_user = user if user else f"账号{account_index}"
+
+        print(f"\n==== Deepflood 账号 {display_user} 开始签到 ====")
+
+        if cookie:
+            result, msg = df_sign(cookie, df_random)
+        else:
+            result, msg = "invalid", "无Cookie"
+
+        if result in ["success", "already"]:
+            print(f"账号 {display_user} 签到成功: {msg}")
+
+            print("正在查询签到收益统计...")
+            stats, stats_msg = df_get_signin_stats(cookie, 30)
+            if stats:
+                print_signin_stats(stats, display_user)
+            else:
+                print(f"统计查询失败: {stats_msg}")
+
+            if hadsend:
+                try:
+                    notification_msg = f"账号 {display_user} 签到成功：{msg}"
+                    if stats:
+                        notification_msg += f"\n{stats['period']}已签到{stats['days_count']}天，共获得{stats['total_amount']}个鸡腿，平均{stats['average']}个/天"
+                    send("Deepflood 签到", notification_msg)
+                except Exception as e:
+                    print(f"发送通知失败: {e}")
+        else:
+            print(f"签到失败或Cookie无效: {msg}")
+
+            if user and password:
+                print("尝试重新登录获取新Cookie...")
+                new_cookie = df_session_login(user, password, df_solver_type, api_base_url, client_key)
+                if new_cookie:
+                    print("登录成功，使用新Cookie重新签到...")
+                    result, msg = df_sign(new_cookie, df_random)
+                    if result in ["success", "already"]:
+                        print(f"账号 {display_user} 签到成功: {msg}")
+                        cookies_updated = True
+
+                        print("正在查询签到收益统计...")
+                        stats, stats_msg = df_get_signin_stats(new_cookie, 30)
+                        if stats:
+                            print_signin_stats(stats, display_user)
+                        else:
+                            print(f"统计查询失败: {stats_msg}")
+
+                        cookie_list[i] = new_cookie
+
+                        if hadsend:
+                            try:
+                                notification_msg = f"账号 {display_user} 签到成功：{msg}"
+                                if stats:
+                                    notification_msg += f"\n{stats['period']}已签到{stats['days_count']}天，共获得{stats['total_amount']}个鸡腿，平均{stats['average']}个/天"
+                                send("Deepflood 签到", notification_msg)
+                            except Exception as e:
+                                print(f"发送通知失败: {e}")
+                    else:
+                        print(f"账号 {display_user} 重新签到仍然失败: {msg}")
+                else:
+                    print(f"账号 {display_user} 登录失败，无法获取新Cookie")
+                    if hadsend:
+                        try:
+                            send("Deepflood 登录失败", f"账号 {display_user} 登录失败")
+                        except Exception as e:
+                            print(f"发送通知失败: {e}")
+            else:
+                print(f"账号 {display_user} 无法重新登录: 未配置用户名或密码")
+
+    if cookies_updated and cookie_list:
+        print("\n==== Deepflood 处理完毕，保存更新后的Cookie ====")
+        all_cookies_new = "&".join([c for c in cookie_list if c.strip()])
+        try:
+            save_cookie("DF_COOKIE", all_cookies_new, cookie_file_path=df_cookie_file_path, remarks="Deepflood签到自动创建")
+            print("Deepflood Cookie 已成功保存")
+        except Exception as e:
+            print(f"保存Deepflood Cookie变量异常: {e}")
+    
+
+# ---------------- 主流程 ----------------
+if __name__ == "__main__":
+    run_nodeseek_signins()
+    run_deepflood_signins()
