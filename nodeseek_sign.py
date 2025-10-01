@@ -627,9 +627,12 @@ def df_sign(df_cookie, df_random):
         return "error", str(e)
 
 def df_get_signin_stats(df_cookie, days=30):
-    """查询本月的签到收益统计"""
+    """查询近 days 天内的签到收益统计"""
     if not df_cookie:
         return None, "无有效Cookie"
+
+    if days <= 0:
+        days = 1
 
     headers = {
         'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
@@ -639,15 +642,14 @@ def df_get_signin_stats(df_cookie, days=30):
     }
 
     try:
-        utc_offset = timedelta(hours=8)
-        now_utc = datetime.now(ZoneInfo("UTC"))
-        now_shanghai = now_utc + utc_offset
-        current_month_start = datetime(now_shanghai.year, now_shanghai.month, 1)
+        shanghai_tz = ZoneInfo("Asia/Shanghai")
+        now_shanghai = datetime.now(shanghai_tz)
+        query_start_time = now_shanghai - timedelta(days=days)
 
         all_records = []
         page = 1
 
-        while page <= 10:
+        while page <= 20:
             url = f"https://www.deepflood.com/api/account/credit/page-{page}"
             response = requests.get(url, headers=headers, impersonate="chrome110")
             data = response.json()
@@ -659,13 +661,11 @@ def df_get_signin_stats(df_cookie, days=30):
             if not records:
                 break
 
-            last_record_time = datetime.fromisoformat(records[-1][3].replace('Z', '+00:00'))
-            last_record_time_shanghai = last_record_time.replace(tzinfo=None) + utc_offset
-            if last_record_time_shanghai < current_month_start:
+            last_record_time = datetime.fromisoformat(records[-1][3].replace('Z', '+00:00')).astimezone(shanghai_tz)
+            if last_record_time < query_start_time:
                 for record in records:
-                    record_time = datetime.fromisoformat(record[3].replace('Z', '+00:00'))
-                    record_time_shanghai = record_time.replace(tzinfo=None) + utc_offset
-                    if record_time_shanghai >= current_month_start:
+                    record_time = datetime.fromisoformat(record[3].replace('Z', '+00:00')).astimezone(shanghai_tz)
+                    if record_time >= query_start_time:
                         all_records.append(record)
                 break
             else:
@@ -677,16 +677,19 @@ def df_get_signin_stats(df_cookie, days=30):
         signin_records = []
         for record in all_records:
             amount, balance, description, timestamp = record
-            record_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-            record_time_shanghai = record_time.replace(tzinfo=None) + utc_offset
+            record_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00')).astimezone(shanghai_tz)
 
-            if (record_time_shanghai >= current_month_start and
+            if (record_time >= query_start_time and
                     "签到收益" in description and "鸡腿" in description):
                 signin_records.append({
                     'amount': amount,
-                    'date': record_time_shanghai.strftime('%Y-%m-%d'),
+                    'date': record_time.strftime('%Y-%m-%d'),
                     'description': description
                 })
+
+        period_desc = f"近{days}天"
+        if days == 1:
+            period_desc = "今天"
 
         if not signin_records:
             return {
@@ -694,8 +697,8 @@ def df_get_signin_stats(df_cookie, days=30):
                 'average': 0,
                 'days_count': 0,
                 'records': [],
-                'period': f"{now_shanghai.strftime('%Y年%m月')}"
-            }, "查询成功，但没有找到本月签到记录"
+                'period': period_desc
+            }, f"查询成功，但没有找到{period_desc}的签到记录"
 
         total_amount = sum(record['amount'] for record in signin_records)
         days_count = len(signin_records)
@@ -706,14 +709,13 @@ def df_get_signin_stats(df_cookie, days=30):
             'average': average,
             'days_count': days_count,
             'records': signin_records,
-            'period': f"{now_shanghai.strftime('%Y年%m月')}"
+            'period': period_desc
         }
 
         return stats, "查询成功"
 
     except Exception as e:
         return None, f"查询异常: {str(e)}"
-
 
 def run_deepflood_signins():
     print("\n==== Deepflood 签到任务开始 ====")

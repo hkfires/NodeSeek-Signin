@@ -102,6 +102,7 @@ def main():
     mode, value = get_run_config()
     print(f"调度模式: '{mode}', 配置值: '{value}'", flush=True)
     
+    print("启动后立即执行一次签到任务...", flush=True)
     run_checkin_task()  # 启动时执行，避免错过当天签到
 
     while True:
