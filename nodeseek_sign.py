@@ -255,7 +255,10 @@ def sign(ns_cookie, ns_random):
         'Cookie': ns_cookie
     }
     try:
-        url = f"https://www.nodeseek.com/api/attendance?random={ns_random}"
+        # 后端可能将非空字符串当作真值，这里统一转为 0/1
+        truthy = {"1", "true", "yes", "y", "on"}
+        random_flag = "1" if str(ns_random).strip().lower() in truthy else "0"
+        url = f"https://www.nodeseek.com/api/attendance?random={random_flag}"
         response = requests.post(url, headers=headers, impersonate="chrome110")
         data = response.json()
         msg = data.get("message", "")
@@ -394,10 +397,17 @@ def run_nodeseek_signins():
     solver_type = os.getenv("SOLVER_TYPE", "turnstile")
     api_base_url = os.getenv("API_BASE_URL", "")
     client_key = os.getenv("CLIENTT_KEY", "")
-    ns_random = os.getenv("NS_RANDOM", "true")
+    # 解析随机/固定签到开关，兼容大小写与多种写法
+    def _bool_env(name: str, default: str = "true") -> str:
+        raw = os.getenv(name, default)
+        val = str(raw).strip().lower()
+        return "true" if val in {"1", "true", "yes", "y", "on"} else "false"
+
+    ns_random = _bool_env("NS_RANDOM", "true")
 
     env_type = detect_environment()
     print(f"当前运行环境: {env_type}")
+    print(f"NodeSeek 随机签到开关: {ns_random}")
 
     accounts = []
 
@@ -612,7 +622,10 @@ def df_sign(df_cookie, df_random):
         'Cookie': df_cookie
     }
     try:
-        url = f"https://www.deepflood.com/api/attendance?random={df_random}"
+        # 统一转为 0/1，避免 'false' 字符串被当作真
+        truthy = {"1", "true", "yes", "y", "on"}
+        random_flag = "1" if str(df_random).strip().lower() in truthy else "0"
+        url = f"https://www.deepflood.com/api/attendance?random={random_flag}"
         response = requests.post(url, headers=headers, impersonate="chrome110")
         data = response.json()
         msg = data.get("message", "")
@@ -722,11 +735,18 @@ def run_deepflood_signins():
     df_solver_type = os.getenv("DF_SOLVER_TYPE", os.getenv("SOLVER_TYPE", "turnstile"))
     api_base_url = os.getenv("DF_API_BASE_URL", os.getenv("API_BASE_URL", ""))
     client_key = os.getenv("DF_CLIENTT_KEY", os.getenv("CLIENTT_KEY", ""))
-    df_random = os.getenv("DF_RANDOM", "true")
+    # 复用上面的环境变量布尔解析
+    def _bool_env(name: str, default: str = "true") -> str:
+        raw = os.getenv(name, default)
+        val = str(raw).strip().lower()
+        return "true" if val in {"1", "true", "yes", "y", "on"} else "false"
+
+    df_random = _bool_env("DF_RANDOM", "true")
 
     env_type = detect_environment()
     print(f"当前运行环境: {env_type}")
     print(f"Deepflood 验证码模式: {df_solver_type}")
+    print(f"Deepflood 随机签到开关: {df_random}")
 
     accounts = []
 
