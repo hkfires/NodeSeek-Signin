@@ -255,10 +255,8 @@ def sign(ns_cookie, ns_random):
         'Cookie': ns_cookie
     }
     try:
-        # 后端可能将非空字符串当作真值，这里统一转为 0/1
-        truthy = {"1", "true", "yes", "y", "on"}
-        random_flag = "1" if str(ns_random).strip().lower() in truthy else "0"
-        url = f"https://www.nodeseek.com/api/attendance?random={random_flag}"
+        # 使用规范化后的布尔字符串 true/false 作为查询参数
+        url = f"https://www.nodeseek.com/api/attendance?random={ns_random}"
         response = requests.post(url, headers=headers, impersonate="chrome110")
         data = response.json()
         msg = data.get("message", "")
@@ -622,10 +620,8 @@ def df_sign(df_cookie, df_random):
         'Cookie': df_cookie
     }
     try:
-        # 统一转为 0/1，避免 'false' 字符串被当作真
-        truthy = {"1", "true", "yes", "y", "on"}
-        random_flag = "1" if str(df_random).strip().lower() in truthy else "0"
-        url = f"https://www.deepflood.com/api/attendance?random={random_flag}"
+        # 使用规范化后的布尔字符串 true/false 作为查询参数
+        url = f"https://www.deepflood.com/api/attendance?random={df_random}"
         response = requests.post(url, headers=headers, impersonate="chrome110")
         data = response.json()
         msg = data.get("message", "")
