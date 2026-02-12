@@ -16,131 +16,6 @@ try:
 except ImportError:
     print("未加载通知模块，跳过通知功能")
 
-# ---------------- 环境检测函数 ----------------
-def detect_environment():
-    """检测当前运行环境"""
-    # 优先检测是否在 Docker 环境中
-    if os.environ.get("IN_DOCKER") == "true":
-        return "docker"
-        
-    # 检测是否在青龙环境中
-    ql_path_markers = ['/ql/data/', '/ql/config/', '/ql/', '/.ql/']
-    in_ql_env = False
-    
-    for path in ql_path_markers:
-        if os.path.exists(path):
-            in_ql_env = True
-            break
-    
-    # 检测是否在GitHub Actions环境中
-    in_github_env = os.environ.get("GITHUB_ACTIONS") == "true" or (os.environ.get("GH_PAT") and os.environ.get("GITHUB_REPOSITORY"))
-    
-    if in_ql_env:
-        return "qinglong"
-    elif in_github_env:
-        return "github"
-    else:
-        return "unknown"
-
-# ---------------- GitHub 变量写入函数 ----------------
-def save_cookie_to_github_var(var_name: str, cookie: str):
-    import requests as py_requests
-    token = os.environ.get("GH_PAT")
-    repo = os.environ.get("GITHUB_REPOSITORY")
-    if not token or not repo:
-        print("GH_PAT 或 GITHUB_REPOSITORY 未设置，跳过GitHub变量更新")
-        return False
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json"
-    }
-
-    url_check = f"https://api.github.com/repos/{repo}/actions/variables/{var_name}"
-    url_create = f"https://api.github.com/repos/{repo}/actions/variables"
-
-    data = {"name": var_name, "value": cookie}
-
-    response = py_requests.patch(url_check, headers=headers, json=data)
-    if response.status_code == 204:
-        print(f"GitHub: {var_name} 更新成功")
-        return True
-    elif response.status_code == 404:
-        print(f"GitHub: {var_name} 不存在，尝试创建...")
-        response = py_requests.post(url_create, headers=headers, json=data)
-        if response.status_code == 201:
-            print(f"GitHub: {var_name} 创建成功")
-            return True
-        else:
-            print(f"GitHub创建失败: {response.status_code}, {response.text}")
-            return False
-    else:
-        print(f"GitHub设置失败: {response.status_code}, {response.text}")
-        return False
-
-# ---------------- 青龙面板变量删除函数 ----------------
-def delete_ql_env(var_name: str):
-    """删除青龙面板中的指定环境变量"""
-    try:
-        print(f"查询要删除的环境变量: {var_name}")
-        env_result = QLAPI.getEnvs({"searchValue": var_name})
-        
-        env_ids = []
-        if env_result.get("code") == 200 and env_result.get("data"):
-            for env in env_result.get("data"):
-                if env.get("name") == var_name:
-                    env_ids.append(env.get("id"))
-        
-        if env_ids:
-            print(f"找到 {len(env_ids)} 个环境变量需要删除: {env_ids}")
-            delete_result = QLAPI.deleteEnvs({"ids": env_ids})
-            if delete_result.get("code") == 200:
-                print(f"成功删除环境变量: {var_name}")
-                return True
-            else:
-                print(f"删除环境变量失败: {delete_result}")
-                return False
-        else:
-            print(f"未找到环境变量: {var_name}")
-            return True
-    except (TurnstileSolverError, YesCaptchaSolverError) as e:
-        print(f"验证码解析错误: {e}")
-        return None
-    except Exception as e:
-        print(f"删除环境变量异常: {str(e)}")
-        return False
-
-# ---------------- 青龙面板变量更新函数 ----------------
-def save_cookie_to_ql(var_name: str, cookie: str, remarks: str = "NodeSeek签到自动创建"):
-    """保存Cookie到青龙面板环境变量"""
-    
-    try:
-        delete_result = delete_ql_env(var_name)
-        if not delete_result:
-            print("删除已有变量失败，但仍将尝试创建新变量")
-        
-        create_data = {
-            "envs": [
-                {
-                    "name": var_name,
-                    "value": cookie,
-                    "remarks": remarks,
-                    "status": 2  # 启用状态
-                }
-            ]
-        }
-        
-        create_result = QLAPI.createEnv(create_data)
-        if create_result.get("code") == 200:
-            print(f"青龙面板环境变量 {var_name} 创建成功")
-            return True
-        else:
-            print(f"青龙面板环境变量创建失败: {create_result}")
-            return False
-    except Exception as e:
-        print(f"青龙面板环境变量操作异常: {str(e)}")
-        return False
-
 # ---------------- Docker Cookie 文件保存 ----------------
 COOKIE_FILE_PATH = "./cookie/NS_COOKIE.txt"
 
@@ -155,27 +30,6 @@ def save_cookie_to_file(cookie_str: str, file_path: str):
         return True
     except Exception as e:
         print(f"保存Cookie到文件失败: {e}")
-        return False
-
-# ---------------- 统一变量保存函数 ----------------
-def save_cookie(var_name: str, cookie: str, cookie_file_path: str = COOKIE_FILE_PATH, remarks: str = "NodeSeek签到自动创建"):
-    """根据当前环境保存Cookie到相应位置"""
-    env_type = detect_environment()
-    
-    if env_type == "docker":
-        if cookie_file_path:
-            print("检测到Docker环境，保存Cookie到文件...")
-            return save_cookie_to_file(cookie, cookie_file_path)
-        print("检测到Docker环境，但未提供Cookie文件路径，跳过文件保存")
-        return False
-    elif env_type == "qinglong":
-        print("检测到青龙环境，保存变量到青龙面板...")
-        return save_cookie_to_ql(var_name, cookie, remarks=remarks)
-    elif env_type == "github":
-        print("检测到GitHub环境，保存变量到GitHub Actions...")
-        return save_cookie_to_github_var(var_name, cookie)
-    else:
-        print("未检测到支持的环境，跳过变量保存")
         return False
 
 # ---------------- 登录逻辑 ----------------
@@ -206,7 +60,7 @@ def session_login(user, password, solver_type, api_base_url, client_key):
         print(f"验证码错误: {e}")
         return None
 
-    session = requests.Session(impersonate="chrome110")
+    session = requests.Session(impersonate="chrome136")
     session.get("https://www.nodeseek.com/signIn.html")
 
     data = {
@@ -246,7 +100,7 @@ def session_login(user, password, solver_type, api_base_url, client_key):
 def sign(ns_cookie, ns_random):
     if not ns_cookie:
         return "invalid", "无有效Cookie"
-        
+
     headers = {
         'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
         'origin': "https://www.nodeseek.com",
@@ -257,7 +111,11 @@ def sign(ns_cookie, ns_random):
     try:
         # 使用规范化后的布尔字符串 true/false 作为查询参数
         url = f"https://www.nodeseek.com/api/attendance?random={ns_random}"
-        response = requests.post(url, headers=headers, impersonate="chrome110")
+        response = requests.post(url, headers=headers, impersonate="chrome136")
+        if response.status_code == 403:
+            print("[ERROR] 403 Forbidden - 仍被 Cloudflare 阻拦")
+            print(f"[DEBUG] 响应内容: {response.text[:300]}")
+            return "error", "403 Forbidden - Cloudflare 阻拦"
         data = response.json()
         msg = data.get("message", "")
         if "鸡腿" in msg or data.get("success"):
@@ -275,41 +133,41 @@ def get_signin_stats(ns_cookie, days=30):
     """查询前days天内的签到收益统计"""
     if not ns_cookie:
         return None, "无有效Cookie"
-    
+
     if days <= 0:
         days = 1
-    
+
     headers = {
         'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
         'origin': "https://www.nodeseek.com",
         'referer': "https://www.nodeseek.com/board",
         'Cookie': ns_cookie
     }
-    
+
     try:
         # 使用UTC+8时区（上海时区）
         shanghai_tz = ZoneInfo("Asia/Shanghai")
         now_shanghai = datetime.now(shanghai_tz)
-        
+
         # 计算查询开始时间：当前时间减去指定天数
         query_start_time = now_shanghai - timedelta(days=days)
-        
+
         # 获取多页数据以确保覆盖指定天数内的所有数据
         all_records = []
         page = 1
-        
+
         while page <= 20:  # 最多查询20页，防止无限循环
             url = f"https://www.nodeseek.com/api/account/credit/page-{page}"
-            response = requests.get(url, headers=headers, impersonate="chrome110")
+            response = requests.get(url, headers=headers, impersonate="chrome136")
             data = response.json()
-            
+
             if not data.get("success") or not data.get("data"):
                 break
-                
+
             records = data.get("data", [])
             if not records:
                 break
-                
+
             # 检查最后一条记录的时间，如果超出查询范围就停止
             last_record_time = datetime.fromisoformat(
                 records[-1][3].replace('Z', '+00:00'))
@@ -325,10 +183,10 @@ def get_signin_stats(ns_cookie, days=30):
                 break
             else:
                 all_records.extend(records)
-                
+
             page += 1
             time.sleep(0.5)
-        
+
         # 筛选指定天数内的签到收益记录
         signin_records = []
         for record in all_records:
@@ -336,7 +194,7 @@ def get_signin_stats(ns_cookie, days=30):
             record_time = datetime.fromisoformat(
                 timestamp.replace('Z', '+00:00'))
             record_time_shanghai = record_time.astimezone(shanghai_tz)
-            
+
             # 只统计指定天数内的签到收益
             if (record_time_shanghai >= query_start_time and
                     "签到收益" in description and "鸡腿" in description):
@@ -345,12 +203,12 @@ def get_signin_stats(ns_cookie, days=30):
                     'date': record_time_shanghai.strftime('%Y-%m-%d'),
                     'description': description
                 })
-        
+
         # 生成时间范围描述
         period_desc = f"近{days}天"
         if days == 1:
             period_desc = "今天"
-        
+
         if not signin_records:
             return {
                 'total_amount': 0,
@@ -359,12 +217,12 @@ def get_signin_stats(ns_cookie, days=30):
                 'records': [],
                 'period': period_desc,
             }, f"查询成功，但没有找到{period_desc}的签到记录"
-        
+
         # 统计数据
         total_amount = sum(record['amount'] for record in signin_records)
         days_count = len(signin_records)
         average = round(total_amount / days_count, 2) if days_count > 0 else 0
-        
+
         stats = {
             'total_amount': total_amount,
             'average': average,
@@ -372,9 +230,9 @@ def get_signin_stats(ns_cookie, days=30):
             'records': signin_records,
             'period': period_desc
         }
-        
+
         return stats, "查询成功"
-        
+
     except Exception as e:
         return None, f"查询异常: {str(e)}"
 
@@ -383,7 +241,7 @@ def print_signin_stats(stats, account_name):
     """打印签到统计信息"""
     if not stats:
         return
-        
+
     print(f"\n==== {account_name} 签到收益统计 ({stats['period']}) ====")
     print(f"签到天数: {stats['days_count']} 天")
     print(f"总获得鸡腿: {stats['total_amount']} 个")
@@ -403,8 +261,6 @@ def run_nodeseek_signins():
 
     ns_random = _bool_env("NS_RANDOM", "true")
 
-    env_type = detect_environment()
-    print(f"当前运行环境: {env_type}")
     print(f"NodeSeek 随机签到开关: {ns_random}")
 
     accounts = []
@@ -425,19 +281,16 @@ def run_nodeseek_signins():
             break
 
     all_cookies = ""
-    if env_type == "docker":
-        print(f"Docker环境，尝试从 {COOKIE_FILE_PATH} 读取Cookie...")
-        if os.path.exists(COOKIE_FILE_PATH):
-            try:
-                with open(COOKIE_FILE_PATH, "r") as f:
-                    all_cookies = f.read().strip()
-                print("成功从文件加载Cookie。")
-            except Exception as e:
-                print(f"从文件读取Cookie失败: {e}")
-        else:
-            print("Cookie文件不存在，将使用空Cookie。")
+    print(f"尝试从 {COOKIE_FILE_PATH} 读取Cookie...")
+    if os.path.exists(COOKIE_FILE_PATH):
+        try:
+            with open(COOKIE_FILE_PATH, "r") as f:
+                all_cookies = f.read().strip()
+            print("成功从文件加载Cookie。")
+        except Exception as e:
+            print(f"从文件读取Cookie失败: {e}")
     else:
-        all_cookies = os.getenv("NS_COOKIE", "")
+        print("Cookie文件不存在，将使用空Cookie。")
 
     cookie_list = all_cookies.split("&")
     cookie_list = [c.strip() for c in cookie_list if c.strip()]
@@ -538,7 +391,7 @@ def run_nodeseek_signins():
         print("\n==== 处理完毕，保存更新后的Cookie ====")
         all_cookies_new = "&".join([c for c in cookie_list if c.strip()])
         try:
-            save_cookie("NS_COOKIE", all_cookies_new)
+            save_cookie_to_file(all_cookies_new, COOKIE_FILE_PATH)
             print("所有Cookie已成功保存")
         except Exception as e:
             print(f"保存Cookie变量异常: {e}")
@@ -572,7 +425,7 @@ def df_session_login(user, password, solver_type, api_base_url, client_key):
         print(f"验证码错误: {e}")
         return None
 
-    session = requests.Session(impersonate="chrome110")
+    session = requests.Session(impersonate="chrome136")
     session.get("https://www.deepflood.com/signIn.html")
 
     data = {
@@ -622,7 +475,11 @@ def df_sign(df_cookie, df_random):
     try:
         # 使用规范化后的布尔字符串 true/false 作为查询参数
         url = f"https://www.deepflood.com/api/attendance?random={df_random}"
-        response = requests.post(url, headers=headers, impersonate="chrome110")
+        response = requests.post(url, headers=headers, impersonate="chrome136")
+        if response.status_code == 403:
+            print("[ERROR] 403 Forbidden - 仍被 Cloudflare 阻拦")
+            print(f"[DEBUG] 响应内容: {response.text[:300]}")
+            return "error", "403 Forbidden - Cloudflare 阻拦"
         data = response.json()
         msg = data.get("message", "")
         if "鸡腿" in msg or data.get("success"):
@@ -660,7 +517,7 @@ def df_get_signin_stats(df_cookie, days=30):
 
         while page <= 20:
             url = f"https://www.deepflood.com/api/account/credit/page-{page}"
-            response = requests.get(url, headers=headers, impersonate="chrome110")
+            response = requests.get(url, headers=headers, impersonate="chrome136")
             data = response.json()
 
             if not data.get("success") or not data.get("data"):
@@ -739,8 +596,6 @@ def run_deepflood_signins():
 
     df_random = _bool_env("DF_RANDOM", "true")
 
-    env_type = detect_environment()
-    print(f"当前运行环境: {env_type}")
     print(f"Deepflood 验证码模式: {df_solver_type}")
     print(f"Deepflood 随机签到开关: {df_random}")
 
@@ -763,19 +618,16 @@ def run_deepflood_signins():
 
     df_cookie_file_path = "./cookie/DF_COOKIE.txt"
     all_cookies = ""
-    if env_type == "docker":
-        print(f"Docker环境，尝试从 {df_cookie_file_path} 读取Cookie...")
-        if os.path.exists(df_cookie_file_path):
-            try:
-                with open(df_cookie_file_path, "r") as f:
-                    all_cookies = f.read().strip()
-                print("成功从文件加载Cookie。")
-            except Exception as e:
-                print(f"从文件读取Cookie失败: {e}")
-        else:
-            print("Cookie文件不存在，将使用空Cookie。")
+    print(f"尝试从 {df_cookie_file_path} 读取Cookie...")
+    if os.path.exists(df_cookie_file_path):
+        try:
+            with open(df_cookie_file_path, "r") as f:
+                all_cookies = f.read().strip()
+            print("成功从文件加载Cookie。")
+        except Exception as e:
+            print(f"从文件读取Cookie失败: {e}")
     else:
-        all_cookies = os.getenv("DF_COOKIE", "")
+        print("Cookie文件不存在，将使用空Cookie。")
 
     cookie_list = all_cookies.split("&")
     cookie_list = [c.strip() for c in cookie_list if c.strip()]
@@ -880,11 +732,11 @@ def run_deepflood_signins():
         print("\n==== Deepflood 处理完毕，保存更新后的Cookie ====")
         all_cookies_new = "&".join([c for c in cookie_list if c.strip()])
         try:
-            save_cookie("DF_COOKIE", all_cookies_new, cookie_file_path=df_cookie_file_path, remarks="Deepflood签到自动创建")
+            save_cookie_to_file(all_cookies_new, df_cookie_file_path)
             print("Deepflood Cookie 已成功保存")
         except Exception as e:
             print(f"保存Deepflood Cookie变量异常: {e}")
-    
+
 
 # ---------------- 主流程 ----------------
 if __name__ == "__main__":
